@@ -28,6 +28,11 @@ def handler_message(message):
     bot_anwser = output["messages"][-1].content
     bot.send_message(message.chat.id, bot_anwser)
 
+# реагируем на команду /help
+@bot.message_handler(commands=['help'])
+def help(message):
+    user = message.chat.id
+    bot.send_message(user, "Это бот ПЛАТОН! ")
 
 # Функция main
 def main():
