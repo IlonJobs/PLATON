@@ -34,6 +34,12 @@ def help(message):
     user = message.chat.id
     bot.send_message(user, "Это бот ПЛАТОН! ")
 
+# реагируем на команду /start
+@bot.message_handler(commands=['start'])
+def help(message):
+    user = message.chat.id
+    bot.send_message(user, "СТАРТУЕМ! ")
+
 # Функция main
 def main():
     bot.polling(none_stop=True)
