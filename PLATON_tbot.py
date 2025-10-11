@@ -19,14 +19,7 @@ load_dotenv();
 bot = telebot.TeleBot(os.environ.get("TELEGRAM_BOT_TOKEN"))
 
 
-@bot.message_handler(func=lambda _: True)
-def handler_message(message):
-    config = {"configurable": {"thread_id": message.from_user.id}}
-    query = message.text
-    input_messages = [HumanMessage(query)]
-    output = app.invoke({"messages": input_messages}, config)
-    bot_anwser = output["messages"][-1].content
-    bot.send_message(message.chat.id, bot_anwser)
+
 
 # реагируем на команду /help
 @bot.message_handler(commands=['help'])
@@ -40,6 +33,14 @@ def help(message):
     user = message.chat.id
     bot.send_message(user, "СТАРТУЕМ! ")
 
+@bot.message_handler(content_types=['text'])
+def handler_message(message):
+    config = {"configurable": {"thread_id": message.from_user.id}}
+    query = message.text
+    input_messages = [HumanMessage(query)]
+    output = app.invoke({"messages": input_messages}, config)
+    bot_anwser = output["messages"][-1].content
+    bot.send_message(message.chat.id, bot_anwser)
 # Функция main
 def main():
     bot.polling(none_stop=True)
