@@ -25,6 +25,7 @@ bot = telebot.TeleBot(os.environ.get("TELEGRAM_BOT_TOKEN"))
 @bot.message_handler(commands=['help'])
 def help(message):
     user = message.chat.id
+    config = {"configurable": {"thread_id": message.from_user.id}}
     bot.send_message(user, app.get_state(config))
 
 # реагируем на команду /start
