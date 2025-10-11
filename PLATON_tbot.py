@@ -25,7 +25,7 @@ bot = telebot.TeleBot(os.environ.get("TELEGRAM_BOT_TOKEN"))
 @bot.message_handler(commands=['help'])
 def help(message):
     user = message.chat.id
-    bot.send_message(user, "Это бот ПЛАТОН! ")
+    bot.send_message(user, app.get_state(config))
 
 # реагируем на команду /start
 @bot.message_handler(commands=['start'])
