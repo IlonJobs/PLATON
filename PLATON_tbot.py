@@ -51,7 +51,7 @@ if __name__ == '__main__':
     model = GigaChat(
         credentials=os.environ.get("GIGACHAT_CREDENTIALS"),
         scope="GIGACHAT_API_PERS",
-        model="GigaChat-Max",
+        model="GigaChat-2",
         verify_ssl_certs=False,
     )
     # Инициализируйте граф
