@@ -17,10 +17,15 @@ from typing_extensions import Annotated, TypedDict
 load_dotenv();
 
 bot = telebot.TeleBot(os.environ.get("TELEGRAM_BOT_TOKEN"))
+bot_username = bot.get_me().username  # Получаем имя бота
 
 
 
-
+@bot.message_handler(func=lambda message: message.chat.type in ['group', 'supergroup'])
+def handle_group_message(message):
+    if f'@{bot_username}' in message.text:
+        bot.reply_to(message, "Слушаю мой господин!!!")
+    pass
 # реагируем на команду /help
 @bot.message_handler(commands=['help'])
 def help(message):
@@ -42,6 +47,7 @@ def handler_message(message):
     output = app.invoke({"messages": input_messages}, config)
     bot_anwser = output["messages"][-1].content
     bot.send_message(message.chat.id, bot_anwser)
+
 # Функция main
 def main():
     bot.polling(none_stop=True)
