@@ -20,7 +20,12 @@ bot = telebot.TeleBot(os.environ.get("TELEGRAM_BOT_TOKEN"))
 bot_username = bot.get_me().username  # Получаем имя бота
 
 
-
+# реагируем на команду /start
+@bot.message_handler(commands=['start'])
+def help(message):
+    user = message.chat.id
+    bot.send_message(user, "Стартуем!")
+    
 @bot.message_handler(func=lambda message: message.chat.type in ['group', 'supergroup'])
 def handle_group_message(message):
     if f'@{bot_username}' in message.text:
@@ -33,11 +38,7 @@ def help(message):
     config = {"configurable": {"thread_id": user}}
     bot.send_message(user, str(app.get_state(config)))
 
-# реагируем на команду /start
-@bot.message_handler(commands=['start'])
-def help(message):
-    user = message.chat.id
-    bot.send_message(user, "СТАРТУЕМ! ")
+
 
 @bot.message_handler(content_types=['text'])
 def handler_message(message):
