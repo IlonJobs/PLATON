@@ -29,7 +29,7 @@ def help(message):
 @bot.message_handler(func=lambda message: message.chat.type in ['group', 'supergroup'])
 def handle_group_message(message):
     if f'@{bot_username}' in message.text:
-        bot.reply_to(message, "Слушаю мой господин!!!")
+        bot.reply_to(message, "Слушаю внимательно!")
     pass
 # реагируем на команду /help
 @bot.message_handler(commands=['help'])
