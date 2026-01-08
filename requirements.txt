@@ -8,6 +8,7 @@ langchain
 langchain-community
 langchain-google-genai
 langchain-text-splitters
+langchain_qdrant
 pypdf
 python-dotenv
 pillow

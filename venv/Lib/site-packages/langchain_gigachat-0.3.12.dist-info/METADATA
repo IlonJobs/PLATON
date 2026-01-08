@@ -1,0 +1,84 @@
+Metadata-Version: 2.3
+Name: langchain-gigachat
+Version: 0.3.12
+Summary: An integration package connecting GigaChat and LangChain
+License: MIT
+Requires-Python: >=3.9,<4.0
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Requires-Dist: gigachat (>=0.1.41.post1,<0.2.0)
+Requires-Dist: langchain-core (>=0.3,<0.4)
+Requires-Dist: types-requests (>=2.32,<3.0)
+Project-URL: Repository, https://github.com/ai-forever/langchain-gigachat
+Project-URL: Source Code, https://github.com/ai-forever/langchain-gigachat/tree/master/libs/gigachat
+Description-Content-Type: text/markdown
+
+<div align="center" id="top">
+
+[![GitHub Release](https://img.shields.io/github/v/release/ai-forever/langchain-gigachat?style=flat-square)](https://github.com/ai-forever/langchain-gigachat/releases)
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ai-forever/langchain-gigachat/check_diffs.yml?style=flat-square)](https://github.com/ai-forever/langchain-gigachat/actions/workflows/check_diffs.yml)
+[![GitHub License](https://img.shields.io/github/license/ai-forever/langchain-gigachat?style=flat-square)](https://opensource.org/license/MIT)
+[![GitHub Downloads (all assets, all releases)](https://img.shields.io/pypi/dm/langchain-gigachat?style=flat-square?style=flat-square)](https://pypistats.org/packages/langchain-gigachat)
+[![GitHub Repo stars](https://img.shields.io/github/stars/ai-forever/langchain-gigachat?style=flat-square)](https://star-history.com/#ai-forever/langchain-gigachat)
+[![GitHub Open Issues](https://img.shields.io/github/issues-raw/ai-forever/langchain-gigachat)](https://github.com/ai-forever/langchain-gigachat/issues)
+
+[English](README.md) | [Русский](README-ru_RU.md)
+
+</div>
+
+# langchain-gigachat
+
+This is a library integration with [GigaChat](https://giga.chat/).
+
+## Installation
+
+```bash
+pip install -U langchain-gigachat
+```
+
+## Quickstart
+Follow these simple steps to get up and running quickly.
+
+### Installation
+
+To install the package use following command:
+
+```shell
+pip install -U langchain-gigachat
+```
+
+### Initialization
+
+To initialize chat model:
+
+```python
+from langchain_gigachat.chat_models import GigaChat
+
+giga = GigaChat(credentials="YOUR_AUTHORIZATION_KEY", verify_ssl_certs=False)
+```
+
+To initialize embeddings:
+
+```python
+from langchain_gigachat.embeddings import GigaChatEmbeddings
+
+embedding = GigaChatEmbeddings(
+    credentials="YOUR_AUTHORIZATION_KEY",
+    verify_ssl_certs=False
+)
+```
+
+### Usage
+
+Use the GigaChat object to generate responses:
+
+```python
+print(giga.invoke("Hello, world!"))
+```
+
+Now you can use the GigaChat object with LangChain's standard primitives to create LLM-applications.

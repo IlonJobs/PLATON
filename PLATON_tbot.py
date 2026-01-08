@@ -20,7 +20,7 @@ load_dotenv();
 
 bot = telebot.TeleBot(os.environ.get("TELEGRAM_BOT_TOKEN"))
 bot_username = bot.get_me().username  # Получаем имя бота
-
+kb_service = KnowledgeBase()
 
 
 # реагируем на команду /start
@@ -58,7 +58,7 @@ def handler_message(message):
             bot.reply_to(message, "Текст пустой.")
         return
     
-    input_messages = [HumanMessage(query)]
+    input_messages = [HumanMessage(text)]
     output = app.invoke({"messages": input_messages}, config)
     bot_anwser = output["messages"][-1].content
     bot.send_message(message.chat.id, bot_anwser)
