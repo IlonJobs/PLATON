@@ -20,6 +20,7 @@ bot = telebot.TeleBot(os.environ.get("TELEGRAM_BOT_TOKEN"))
 bot_username = bot.get_me().username  # Получаем имя бота
 
 
+
 # реагируем на команду /start
 @bot.message_handler(commands=['start'])
 def help(message):
@@ -42,8 +43,19 @@ def help(message):
 
 @bot.message_handler(content_types=['text'])
 def handler_message(message):
-    config = {"configurable": {"thread_id": message.from_user.id}}
-    query = message.text
+    user_id = message.from_user.id
+    config = {"configurable": {"thread_id": user_id}}
+    text = message.text
+
+    if text.lower().startswith("запомни:"):
+        content = text[8:].strip()
+        if content:
+            kb_service.add_text(content, user_id)
+            bot.reply_to(message, "✅ Записал в базу знаний.")
+        else:
+            bot.reply_to(message, "Текст пустой.")
+        return
+    
     input_messages = [HumanMessage(query)]
     output = app.invoke({"messages": input_messages}, config)
     bot_anwser = output["messages"][-1].content
