@@ -14,6 +14,8 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 from typing_extensions import Annotated, TypedDict
 
+from knowledge_base import KnowledgeBase
+
 load_dotenv();
 
 bot = telebot.TeleBot(os.environ.get("TELEGRAM_BOT_TOKEN"))

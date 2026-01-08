@@ -11,6 +11,8 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from dotenv import load_dotenv
 
+
+
 load_dotenv()
 
 # Настройки
@@ -26,7 +28,7 @@ class KnowledgeBase:
         
         # 2. Клиент Qdrant
         self.qdrant_client = QdrantClient(
-            url=os.getenv("QDRANT_URL"),
+            url=os.getenv("QDRANT_HOST"),
             api_key=os.getenv("QDRANT_API_KEY")
         )
 
