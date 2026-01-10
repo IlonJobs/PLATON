@@ -10,34 +10,56 @@ from langchain_community.document_loaders import PyPDFLoader
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from dotenv import load_dotenv
+from langchain_gigachat.embeddings.gigachat import GigaChatEmbeddings
+from langchain_gigachat.chat_models import GigaChat
 
 
 
 load_dotenv()
 
 # Настройки
-COLLECTION_NAME = "telegram_gemini_kb"
+COLLECTION_NAME = "telegram_kb"
 # Используем модель Gemini 1.5 Flash (быстрая и дешевая/бесплатная)
 LLM_MODEL = "gemini-1.5-flash"
 EMBEDDING_MODEL = "models/text-embedding-004"
 
 class KnowledgeBase:
     def __init__(self):
-        # 1. Настройка Embeddings от Google
-        self.embeddings = GoogleGenerativeAIEmbeddings(model=EMBEDDING_MODEL)
+        # 1. Настройка Embeddings
+         
+        # от Google
+        #self.embeddings = GoogleGenerativeAIEmbeddings(model=EMBEDDING_MODEL)
+
+        #от СБЕРа  
+        embedding=GigaChatEmbeddings(
+            credentials=os.environ.get("GIGACHAT_CREDENTIALS"),
+            scope="GIGACHAT_API_PERS",
+            verify_ssl_certs=False,
+        )
+        self.embeddings = embedding
         
         # 2. Клиент Qdrant
         self.qdrant_client = QdrantClient(
-            url=os.getenv("QDRANT_HOST"),
-            api_key=os.getenv("QDRANT_API_KEY")
+            url=os.environ.get("QDRANT_HOST"),
+            api_key=os.environ.get("QDRANT_API_KEY")
         )
 
+        self.qdrant_client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="metadata.user_id",       # Путь к полю в JSON
+            field_schema=models.PayloadSchemaType.INTEGER # Тип данных (число)
+        )
+
+
+
+        vector_size = 1024  # размерность для GigaChatEmbeddings
+        #vector_size=768,  # Размерность text-embedding-004
         # Создаем коллекцию, если нет
         if not self.qdrant_client.collection_exists(COLLECTION_NAME):
             self.qdrant_client.create_collection(
                 collection_name=COLLECTION_NAME,
                 vectors_config=models.VectorParams(
-                    size=768,  # Размерность text-embedding-004
+                    size=vector_size,  
                     distance=models.Distance.COSINE
                 )
             )
@@ -49,13 +71,24 @@ class KnowledgeBase:
             embedding=self.embeddings
         )
 
-        # 3. LLM Gemini
+        # 3. LLM 
+        # Gemini
+        '''
         self.llm = ChatGoogleGenerativeAI(
             model=LLM_MODEL, 
             temperature=0.3,
             convert_system_message_to_human=True # Иногда нужно для старых версий langchain
         )
-
+        
+        #СБЕР
+        '''
+        self.llm = GigaChat(
+            credentials=os.environ.get("GIGACHAT_CREDENTIALS"),
+            scope="GIGACHAT_API_PERS",
+            model="GigaChat-2",
+            verify_ssl_certs=False,
+        )
+        
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
             chunk_overlap=200
@@ -92,7 +125,7 @@ class KnowledgeBase:
         # Поиск с фильтром по user_id
         search_results = self.vector_store.similarity_search(
             query,
-            k=4,
+            k=6,
             filter=models.Filter(
                 must=[
                     models.FieldCondition(
@@ -122,6 +155,6 @@ class KnowledgeBase:
         Вопрос пользователя: {query}
         """
 
-        # Gemini принимает список сообщений или строку
+        # LLM принимает список сообщений или строку
         response = self.llm.invoke(prompt)
         return response.content
