@@ -44,11 +44,7 @@ class KnowledgeBase:
             api_key=os.environ.get("QDRANT_API_KEY")
         )
 
-        self.qdrant_client.create_payload_index(
-            collection_name=COLLECTION_NAME,
-            field_name="metadata.user_id",       # Путь к полю в JSON
-            field_schema=models.PayloadSchemaType.INTEGER # Тип данных (число)
-        )
+
 
 
 
@@ -64,6 +60,12 @@ class KnowledgeBase:
                 )
             )
 
+        self.qdrant_client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="metadata.user_id",       # Путь к полю в JSON
+            field_schema=models.PayloadSchemaType.INTEGER # Тип данных (число)
+        )
+        
         # Интеграция LangChain и Qdrant
         self.vector_store = QdrantVectorStore(
             client=self.qdrant_client,
