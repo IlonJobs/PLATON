@@ -65,7 +65,7 @@ class KnowledgeBase:
             field_name="metadata.user_id",       # Путь к полю в JSON
             field_schema=models.PayloadSchemaType.INTEGER # Тип данных (число)
         )
-        
+
         # Интеграция LangChain и Qdrant
         self.vector_store = QdrantVectorStore(
             client=self.qdrant_client,
@@ -146,8 +146,10 @@ class KnowledgeBase:
         history_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in chat_history[-5:]])
 
         prompt = f"""
-        Ты помощник. Отвечай на вопрос, используя контекст и историю.
+        Ты помощник. Отвечай на вопрос, используя контекст и историю. Ничего не придумывай!
+        Если в контексте и истории ответ не найден, тогда сообщи, "в базе знаний ответ не найден".
         
+
         Контекст:
         {context_text}
         
