@@ -39,7 +39,8 @@ def send_welcome(message):
                  "Привет! Я бот с памятью на базе LLM.\n"
                  "1. Пришли PDF файл — я его прочитаю и сохраню в базу знаний.\n"
                  "2. Напиши 'Запомни: [текст]' — я сохраню заметку в базу знаний.\n"
-                 "3. Задай вопрос — я отвечу по базе знаний.")
+                 "3. Задай вопрос — я отвечу по базе знаний.\n"
+                 "4. /help - список доступных команд")
 
     
 @bot.message_handler(func=lambda message: message.chat.type in ['group', 'supergroup'])
@@ -53,7 +54,16 @@ def handle_group_message(message):
 def help(message):
     user = message.chat.id
     config = {"configurable": {"thread_id": user}}
-    bot.send_message(user, str(app.get_state(config)))
+    help_text   =   "Список доступных команд бота:\n " \
+                    "1. /clear - очистка базы знаний"
+    bot.send_message(user, help_text)
+
+# реагируем на команду /clear
+@bot.message_handler(commands=['clear'])
+def clear_db(message):
+    kb_service.clear_user_db(message.from_user.id)
+    bot.send_message(message.chat.id, "База знаний очищена!")
+
 
 # Обработка файлов (документов)
 @bot.message_handler(content_types=['document'])

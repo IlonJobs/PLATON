@@ -100,7 +100,21 @@ class KnowledgeBase:
         """Добавляет текст в базу (синхронно)"""
         docs = [Document(page_content=text, metadata={"user_id": user_id, "source": source})]
         splits = self.text_splitter.split_documents(docs)
-        self.vector_store.add_documents(splits)
+        self.vector_store.add_documents(splits)    
+        
+    def clear_user_db(self, user_id: int, source: str = "message"):
+        """Удалить все точки с конкретным user_id"""
+        self.qdrant_client.delete(
+            collection_name=COLLECTION_NAME,
+            points_selector=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="metadata.user_id",
+                        match=models.MatchValue(value=user_id)
+                    )
+                ]
+            )
+        )
 
     def add_document(self, file_path: str, user_id: int):
         """Обрабатывает файл"""
