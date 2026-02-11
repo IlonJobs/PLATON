@@ -59,6 +59,7 @@ class KnowledgeBase:
                     distance=models.Distance.COSINE
                 )
             )
+            print(f"Создана коллекция {COLLECTION_NAME}")
 
         self.qdrant_client.create_payload_index(
             collection_name=COLLECTION_NAME,
@@ -75,15 +76,15 @@ class KnowledgeBase:
 
         # 3. LLM 
         # Gemini
-        '''
-        self.llm = ChatGoogleGenerativeAI(
-            model=LLM_MODEL, 
-            temperature=0.3,
-            convert_system_message_to_human=True # Иногда нужно для старых версий langchain
-        )
+        
+        # self.llm = ChatGoogleGenerativeAI(
+        #     model=LLM_MODEL, 
+        #     temperature=0.3,
+        #     convert_system_message_to_human=True # Иногда нужно для старых версий langchain
+        # )
         
         #СБЕР
-        '''
+        
         self.llm = GigaChat(
             credentials=os.environ.get("GIGACHAT_CREDENTIALS"),
             scope="GIGACHAT_API_PERS",
@@ -160,7 +161,7 @@ class KnowledgeBase:
         history_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in chat_history[-5:]])
 
         prompt = f"""
-        Ты помощник. Отвечай на вопрос, используя контекст и историю. Ничего не придумывай!
+        Ты программист по python. Отвечай на вопрос, используя ТОЛЬКО контекст и историю. Ничего не придумывай!
         Если в контексте и истории ответ не найден, тогда сообщи, "в базе знаний ответ не найден".
         
 
