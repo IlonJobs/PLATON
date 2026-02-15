@@ -12,8 +12,11 @@ from qdrant_client.http import models
 from dotenv import load_dotenv
 from langchain_gigachat.embeddings.gigachat import GigaChatEmbeddings
 from langchain_gigachat.chat_models import GigaChat
-
-
+from langsmith import traceable
+import pymupdf4llm
+import pathlib
+import pymupdf
+from langchain.schema import Document
 
 load_dotenv()
 
@@ -93,8 +96,8 @@ class KnowledgeBase:
         )
         
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200
+            chunk_size=500,
+            chunk_overlap=100
         )
 
     def add_text(self, text: str, user_id: int, source: str = "message"):
@@ -116,9 +119,10 @@ class KnowledgeBase:
                 ]
             )
         )
-
-    def add_document(self, file_path: str, user_id: int):
+    
+    def add_document0(self, file_path: str, user_id: int):
         """Обрабатывает файл"""
+        
         if file_path.endswith(".pdf"):
             loader = PyPDFLoader(file_path)
             docs = loader.load()
@@ -136,7 +140,45 @@ class KnowledgeBase:
         splits = self.text_splitter.split_documents(docs)
         self.vector_store.add_documents(splits)
         return f"Добавлено {len(splits)} фрагментов."
+    
 
+    def add_document(self, file_path: str, user_id: int):
+        """Обрабатывает файл"""
+        
+        if file_path.endswith(".pdf"):
+            # Конвертируем PDF в Markdown
+            md_text = pymupdf4llm.to_markdown(file_path)
+            
+            # Создаем документ из Markdown текста
+            from langchain.schema import Document
+            docs = [Document(
+                page_content=md_text,
+                metadata={
+                    "user_id": user_id,
+                    "source": os.path.basename(file_path),
+                    "format": "pdf"
+                }
+            )]
+            
+        elif file_path.endswith(".txt"):
+            from langchain_community.document_loaders import TextLoader
+            loader = TextLoader(file_path, encoding='utf-8')
+            docs = loader.load()
+            
+            # Добавляем метаданные
+            for doc in docs:
+                doc.metadata["user_id"] = user_id
+                doc.metadata["source"] = os.path.basename(file_path)
+                
+        else:
+            return "Формат не поддерживается"
+
+        # Разбиваем на фрагменты и добавляем в векторное хранилище
+        splits = self.text_splitter.split_documents(docs)
+        self.vector_store.add_documents(splits)
+        return f"Добавлено {len(splits)} фрагментов."
+    
+    @traceable(name="get_answer", run_type="tool") # <--- Декорируем функцию
     def get_answer(self, query: str, user_id: int, chat_history: List[Dict]):
         """RAG пайплайн"""
         # Поиск с фильтром по user_id
