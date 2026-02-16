@@ -17,6 +17,7 @@ import pymupdf4llm
 import pathlib
 import pymupdf
 from langchain.schema import Document
+from langgraph.graph import StateGraph
 
 load_dotenv()
 
@@ -119,7 +120,27 @@ class KnowledgeBase:
                 ]
             )
         )
-    
+
+    def clean_db(self):
+        """Очистить все точки коллекции"""
+        # Получить информацию о коллекции
+        collection_info = self.qdrant_client.get_collection(COLLECTION_NAME)
+
+        # Удалить коллекцию
+        self.qdrant_client.delete_collection(COLLECTION_NAME)
+
+        # Создать заново с теми же параметрами
+        self.qdrant_client.create_collection(
+            collection_name=COLLECTION_NAME,
+            vectors_config=collection_info.config.params.vectors
+        )
+
+        self.qdrant_client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="metadata.user_id",       # Путь к полю в JSON
+            field_schema=models.PayloadSchemaType.INTEGER # Тип данных (число)
+        )
+
     def add_document0(self, file_path: str, user_id: int):
         """Обрабатывает файл"""
         
@@ -219,3 +240,65 @@ class KnowledgeBase:
         # LLM принимает список сообщений или строку
         response = self.llm.invoke(prompt)
         return response.content
+    
+    @traceable(name="get_relevants", run_type="tool") # <--- Декорируем функцию
+    def get_relevants(self, query: str, user_id: int, numberofchunks: int):
+        """Семантический поиск"""
+        # Поиск с фильтром по user_id
+
+        search_results = self.vector_store.similarity_search_with_score(
+            query,
+            k=numberofchunks,
+            filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="metadata.user_id",
+                        match=models.MatchValue(value=user_id)
+                    )
+                ]
+            )
+        )
+        return search_results
+    
+    @traceable(name="rerank_relevants", run_type="tool") # <--- Декорируем функцию
+    def rerank_relevants(self, documents):
+        """Сортируем по убыванию схожести и берем топ-M выше порога"""
+        M = 3
+        threshold = 0.7
+
+        # Фильтруем по порогу и сортируем по убыванию score
+        ranked_docs = sorted(
+            [(doc, score) for doc, score in documents if score >= threshold],
+            key=lambda x: x[1],  # сортируем по score (второй элемент кортежа)
+            reverse=True
+        )[:M]
+
+        # Формируем итоговую строку контекста
+        final_context = "\n\n".join([doc.page_content for doc, score in ranked_docs])
+        
+        return ranked_docs
+    
+    @traceable(name="generate_answer", run_type="tool") # <--- Декорируем функцию
+    def generate_answer(self, final_context_docs, query: str ):
+        """Итоговый ответ пользователю"""
+
+        # Формируем итоговую строку контекста
+        context_text = "\n\n".join([doc.page_content for doc, score in final_context_docs])
+
+        if not context_text:
+            context_text = "Нет информации в базе знаний."
+
+
+        prompt = f"""
+        Ты программист по python. Отвечай на вопрос, используя ТОЛЬКО контекст. Ничего не придумывай!
+        Если в контексте ответ не найден, тогда сообщи ТОЛЬКО ЭТУ ФРАЗУ:"в базе знаний ответ не найден".
+        
+        Контекст:
+        {context_text}
+        
+        Вопрос пользователя: {query}
+        """
+
+        # LLM принимает список сообщений или строку
+        response = self.llm.invoke(prompt)
+        return response
