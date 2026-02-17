@@ -181,7 +181,7 @@ class KnowledgeBase:
                 }
             )]
             
-        elif file_path.endswith(".txt"):
+        elif file_path.endswith(".txt") or file_path.endswith(".md"):
             from langchain_community.document_loaders import TextLoader
             loader = TextLoader(file_path, encoding='utf-8')
             docs = loader.load()
@@ -263,7 +263,7 @@ class KnowledgeBase:
     @traceable(name="rerank_relevants", run_type="tool") # <--- Декорируем функцию
     def rerank_relevants(self, documents):
         """Сортируем по убыванию схожести и берем топ-M выше порога"""
-        M = 3
+        M = 5
         threshold = 0.7
 
         # Фильтруем по порогу и сортируем по убыванию score

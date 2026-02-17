@@ -62,7 +62,7 @@ class GraphState(TypedDict):
     # Список документов, найденных в базе
     retrieved_docs: List[dict] 
     # Итоговый контекст после ранжирования
-    final_context: str
+    final_retrieved_docs: List[dict] 
 
 # 2. Узлы графа
 def retrieve_node(state: GraphState, config: RunnableConfig):
@@ -88,15 +88,15 @@ def rerank_node(state: GraphState):
     docs = state.get("retrieved_docs", [])
     
     if not docs:
-        return {"final_context": "Информация в базе знаний не найдена."}
+        return {"final_retrieved_docs": "Информация в базе знаний не найдена."}
 
-    final_context_docs = kb_service.rerank_relevants(docs)
+    final_retrieved_docs = kb_service.rerank_relevants(docs)
 
-    return {"final_context": final_context_docs}
+    return {"final_retrieved_docs": final_retrieved_docs}
 
 def generate_node(state: GraphState):
     # Шаг 3: Генерация ответа
-    response = kb_service.generate_answer(state["final_context"], state["query"])
+    response = kb_service.generate_answer(state["final_retrieved_docs"], state["query"])
     return {"messages": [response]}
 
 # 3. Сборка графа
