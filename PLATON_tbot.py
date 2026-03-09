@@ -393,13 +393,25 @@ def handler_message(message):
             )
             bot_answer = bot_answer + sections_footer
 
-        bot.delete_message(message.chat.id, wait_msg.message_id)
+        # Удаляем сообщение-заглушку и отправляем ответ.
+        # Используем try/except — удаление может упасть если сообщение
+        # уже удалено (например, пользователь удалил его вручную).
+        try:
+            bot.delete_message(message.chat.id, wait_msg.message_id)
+        except Exception:
+            pass
         bot.send_message(message.chat.id, bot_answer, parse_mode="Markdown")
-        
+
     except Exception as e:
-        bot.edit_message_text(chat_id=message.chat.id, message_id=wait_msg.message_id, 
-                              text=f"Ошибка генерации: {e}")
-        
+        # Пытаемся отредактировать заглушку с текстом ошибки.
+        # Если сообщение уже удалено — отправляем новым сообщением.
+        error_text = f"❌ Ошибка генерации: {e}"
+        try:
+            bot.edit_message_text(chat_id=message.chat.id,
+                                  message_id=wait_msg.message_id,
+                                  text=error_text)
+        except Exception:
+            bot.send_message(message.chat.id, error_text)
 
 
 # ==========================================

@@ -190,57 +190,31 @@ class KnowledgeBase:
 
     def add_text(self, text: str, user_id: int, source: str = "message"):
         """Добавляет текст в базу (синхронно).
-        
-        ИЗМЕНЕНИЕ: Теперь так же, как add_document, определяет раздел через LLM
-        и создаёт/переиспользует раздел в коллекции sections.
-        Это гарантирует, что у КАЖДОГО чанка в базе есть section_name и section_id,
-        независимо от того, как он был добавлен — файлом или командой «Запомни:».
-        """
-        # --- НОВЫЙ БЛОК: классификация раздела ---
-        existing_sections = self._get_user_sections(user_id)
-        classification = self._classify_document(text, existing_sections)
-        section_name = classification["section_name"]
-        section_description = classification["description"]
-        keywords = classification.get("keywords", [])
 
-        # Определяем section_id: создаём новый раздел или берём существующий
-        section_id = None
-        if classification.get("is_new", True):
-            similar = self._find_similar_section(section_description, user_id)
-            if similar:
-                section_id = similar["id"]
-                section_name = similar["name"]
-                # Раздел существует — пополняем ключевые слова
-                self._update_section_keywords(section_id, keywords)
-            else:
-                section_id = self._create_section(section_name, section_description, keywords, user_id)
-        else:
-            for section in existing_sections:
-                if section["name"] == section_name:
-                    section_id = section["id"]
-                    break
-            if section_id:
-                # Раздел существует — пополняем ключевые слова
-                self._update_section_keywords(section_id, keywords)
-            else:
-                section_id = self._create_section(section_name, section_description, keywords, user_id)
-        # --- КОНЕЦ БЛОКА ---
+        Классифицирует текст через LLM, определяет раздел через _resolve_section
+        и сохраняет чанки с метаданными раздела.
+        """
+        existing_sections = self._get_user_sections()
+        classification    = self._classify_document(text, existing_sections)
+        section_id, section_name = self._resolve_section(classification, user_id)
+
+        keywords            = classification.get("keywords", [])
+        section_description = classification["description"]
 
         docs = [Document(
             page_content=text,
             metadata={
-                "user_id": user_id,
-                "source": source,
-                # НОВОЕ: метаданные раздела — такие же поля, как в add_document
-                "section_id": section_id,
-                "section_name": section_name,
+                "user_id":             user_id,
+                "source":              source,
+                "section_id":          section_id,
+                "section_name":        section_name,
                 "section_description": section_description,
-                "keywords": keywords,
+                "keywords":            keywords,
             }
         )]
         splits = self.text_splitter.split_documents(docs)
         self.vector_store.add_documents(splits)
-        
+
     def clear_user_db(self, user_id: int, source: str = "message"):
         """Удалить все точки с конкретным user_id"""
         self.qdrant_client.delete(
@@ -256,18 +230,30 @@ class KnowledgeBase:
         )
 
     def clean_db(self):
-        """Очистить все точки коллекции и пересоздать с полными индексами."""
-        collection_info = self.qdrant_client.get_collection(COLLECTION_NAME)
+        """Полная очистка базы знаний: пересоздаёт обе коллекции с индексами.
 
+        Очищаем ОБЕ коллекции — иначе после /clean в sections остаются
+        "мёртвые" разделы, на которые нет ни одного чанка в telegram_kb.
+        Это ломает классификацию: find_section_for_query находит несуществующие
+        разделы и фильтрует по ним пустые результаты.
+        """
+        # Пересоздаём telegram_kb
+        kb_info = self.qdrant_client.get_collection(COLLECTION_NAME)
         self.qdrant_client.delete_collection(COLLECTION_NAME)
-
         self.qdrant_client.create_collection(
             collection_name=COLLECTION_NAME,
-            vectors_config=collection_info.config.params.vectors
+            vectors_config=kb_info.config.params.vectors
         )
 
-        # ИСПРАВЛЕНИЕ: раньше здесь создавался только индекс user_id.
-        # Теперь _ensure_indexes создаёт все необходимые индексы для обеих коллекций.
+        # Пересоздаём sections
+        sec_info = self.qdrant_client.get_collection(SECTIONS_COLLECTION)
+        self.qdrant_client.delete_collection(SECTIONS_COLLECTION)
+        self.qdrant_client.create_collection(
+            collection_name=SECTIONS_COLLECTION,
+            vectors_config=sec_info.config.params.vectors
+        )
+
+        # Восстанавливаем все индексы для обеих коллекций
         self._ensure_indexes()
 
     def add_document0(self, file_path: str, user_id: int):
@@ -407,116 +393,130 @@ class KnowledgeBase:
         return res.content.strip().replace('"', '')
 
     def add_document(self, file_path: str, user_id: int):
-        """Обрабатывает файл через Markdown-трансформацию и умное разбиение"""
-        file_name = os.path.basename(file_path)
-        md_content = ""
+        """Обрабатывает файл: конвертация → нарезка → классификация каждого блока → загрузка.
+
+        ИЗМЕНЕНИЕ: порядок шагов изменён принципиально.
+
+        Старый порядок (неверный):
+            классификация ВСЕГО файла → 1 раздел для всех чанков → нарезка
+
+        Новый порядок:
+            1. Конвертация в Markdown
+            2. Нарезка по заголовкам (H1/H2/H3) → логические блоки документа
+            3. Для каждого блока: классификация через LLM → свой раздел
+            4. Дорезаем длинные блоки рекурсивным сплиттером
+            5. Обогащаем метаданными раздела → загружаем в Qdrant
+
+        Почему нарезаем ПО ЗАГОЛОВКАМ, а не по каждому микро-чанку:
+            - Раздел определяется для смыслового блока (под одним заголовком),
+              а не для 500-символьного фрагмента без контекста.
+            - Количество вызовов LLM = количество заголовков, а не чанков
+              (в разы меньше API-запросов).
+            - Микро-чанки одного блока всегда получают один раздел — корректно.
+        """
+        file_name   = os.path.basename(file_path)
+        md_content  = ""
         file_format = ""
 
-        # 1. КОНВЕРТАЦИЯ В MARKDOWN (Markdown-центричность)
+        # ШАГ 1: Конвертация в Markdown
         if file_path.endswith(".pdf"):
-            md_content = pymupdf4llm.to_markdown(file_path)
+            md_content  = pymupdf4llm.to_markdown(file_path)
             file_format = "pdf"
-        
         elif file_path.endswith((".xls", ".xlsx")):
-            df = pd.read_excel(file_path)
-            md_content = f"# Таблица: {file_name}\n\n" + df.to_markdown(index=False)
+            df          = pd.read_excel(file_path)
+            md_content  = f"# Таблица: {file_name}\n\n" + df.to_markdown(index=False)
             file_format = "excel"
-            
         elif file_path.endswith((".txt", ".md")):
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 md_content = f.read()
             file_format = "markdown" if file_path.endswith(".md") else "text"
-            
         else:
             return "Формат не поддерживается"
 
         if not md_content.strip():
             return "Файл пуст"
 
-        # 2. ОПРЕДЕЛЕНИЕ РАЗДЕЛА (Метаданные)
-        existing_sections = self._get_user_sections(user_id)
-        #existing_sections = self._get_existing_sections(user_id)
-        #section = self._determine_section(md_content, existing_sections)
-        
-        # 3. Классифицируем документ
-        classification = self._classify_document(md_content, existing_sections)
-        section_name = classification["section_name"]
-        section_description = classification["description"]
-        keywords = classification.get("keywords", [])
-        
-        # 5. Проверяем, нужно ли создать новый раздел
-        section_id = None
-
-        if classification.get("is_new", True):
-            # Дополнительная проверка через векторный поиск
-            similar = self._find_similar_section(section_description, user_id)
-
-            if similar:
-                print(f"🔍 Найден похожий раздел: '{similar['name']}' (score: {similar['score']:.2f})")
-                section_id = similar['id']
-                section_name = similar['name']
-                # Раздел существует — пополняем его ключевые слова новыми из текущего документа
-                self._update_section_keywords(section_id, keywords)
-            else:
-                # Создаём новый раздел
-                section_id = self._create_section(
-                    section_name, section_description, keywords, user_id
-                )
-        else:
-            # Ищем существующий раздел по имени
-            for section in existing_sections:
-                if section['name'] == section_name:
-                    section_id = section['id']
-                    break
-
-            if section_id:
-                # Раздел существует — пополняем его ключевые слова
-                self._update_section_keywords(section_id, keywords)
-            else:
-                # Раздела нет — создаём
-                section_id = self._create_section(
-                    section_name, section_description, keywords, user_id
-                )
-
-
-        # 4. УМНОЕ РАЗБИЕНИЕ (MarkdownHeaderTextSplitter)
-        
-        # Определяем заголовки, по которым будем резать
+        # ШАГ 2: Нарезка по заголовкам Markdown → логические блоки
         headers_to_split_on = [
-            ("#", "Header_1"),
-            ("##", "Header_2"),
+            ("#",   "Header_1"),
+            ("##",  "Header_2"),
             ("###", "Header_3"),
         ]
-        
-        md_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
-        header_splits = md_splitter.split_text(md_content)
+        md_splitter   = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
+        header_blocks = md_splitter.split_text(md_content)
 
-        # Дорезаем длинные куски рекурсивным сплиттером
-        # chunk_size=CHUNK_SIZE — ограничен лимитом GigaChat Embeddings (514 токенов).
-        # Было 1000 символов → вызывало ошибку 413 "Tokens limit exceeded".
+        # Если заголовков нет — весь файл как один блок
+        if not header_blocks:
+            from langchain.schema import Document as LCDocument
+            header_blocks = [LCDocument(page_content=md_content, metadata={})]
+
+        # ШАГ 3 + 4 + 5: для каждого смыслового блока — своя классификация
         recursive_splitter = RecursiveCharacterTextSplitter(
             chunk_size=CHUNK_SIZE,
             chunk_overlap=CHUNK_OVERLAP
         )
-        final_splits = recursive_splitter.split_documents(header_splits)
 
-        # 4. ОБОГАЩЕНИЕ МЕТАДАННЫХ
-        for split in final_splits:
-            split.metadata.update({
-                "user_id": user_id,
-                "source": file_name,
-                "format": file_format,
-                # МЕТАДАННЫЕ РАЗДЕЛА
-                "section_id": section_id,
-                "section_name": section_name,
-                "section_description": section_description,
-                "keywords": keywords
-            })
+        all_splits      = []
+        existing_sections = self._get_user_sections()
 
-        # 5. ЗАГРУЗКА В QDRANT
-        self.vector_store.add_documents(final_splits)
-        
-        return f"Раздел: {section}. Файл разбит на {len(final_splits)} смысловых чанков."
+        # Кэш: section_name → (section_id, keywords) — не классифицируем повторно
+        # один и тот же раздел, если несколько блоков попали в него подряд.
+        section_cache: Dict[str, tuple] = {}
+
+        for block_idx, block in enumerate(header_blocks):
+            block_text = block.page_content.strip()
+            if not block_text:
+                continue
+
+            # Классификация блока
+            classification = self._classify_document(block_text, existing_sections)
+            raw_section_name = classification["section_name"]
+
+            # Используем кэш: если этот раздел уже разрешали — не дёргаем Qdrant повторно
+            if raw_section_name in section_cache:
+                section_id, section_name = section_cache[raw_section_name]
+                print(f"📦 Блок {block_idx + 1}: раздел из кэша '{section_name}'")
+            else:
+                section_id, section_name = self._resolve_section(classification, user_id)
+                section_cache[raw_section_name] = (section_id, section_name)
+                # Обновляем список разделов, чтобы следующие блоки знали о новом разделе
+                existing_sections = self._get_user_sections()
+                print(f"📦 Блок {block_idx + 1}: раздел '{section_name}'")
+
+            keywords            = classification.get("keywords", [])
+            section_description = classification["description"]
+
+            # Дорезаем блок на микро-чанки
+            sub_chunks = recursive_splitter.split_documents([block])
+
+            # Обогащаем метаданными раздела
+            for chunk in sub_chunks:
+                chunk.metadata.update({
+                    "user_id":             user_id,
+                    "source":              file_name,
+                    "format":              file_format,
+                    "section_id":          section_id,
+                    "section_name":        section_name,
+                    "section_description": section_description,
+                    "keywords":            keywords,
+                })
+
+            all_splits.extend(sub_chunks)
+
+        if not all_splits:
+            return "Файл не содержит текста для индексации."
+
+        # ШАГ 6: Загрузка всех чанков в Qdrant
+        self.vector_store.add_documents(all_splits)
+
+        # Статистика по разделам для отчёта
+        sections_stat: Dict[str, int] = {}
+        for chunk in all_splits:
+            sname = chunk.metadata.get("section_name", "?")
+            sections_stat[sname] = sections_stat.get(sname, 0) + 1
+
+        stat_str = ", ".join(f"'{k}': {v} чанков" for k, v in sections_stat.items())
+        return f"Обработано {len(all_splits)} чанков по разделам: {stat_str}"
 
     def _classify_document(self, text: str, existing_sections: List[Dict]) -> Dict:
         """
@@ -544,7 +544,7 @@ class KnowledgeBase:
         ОТВЕТЬ СТРОГО В ФОРМАТЕ JSON:
         {{
             "section_name": "Название раздела",
-            "description": "Краткое описание темы (1-2 предложения)",
+            "description": "Описание темы в 2-3 предложениях. Включи специфичные термины и понятия раздела. Избегай общих слов — описание используется для векторного поиска.",
             "keywords": ["ключевое слово 1", "ключевое слово 2", "ключевое слово 3"],
             "is_new": true/false
         }}
@@ -618,7 +618,7 @@ class KnowledgeBase:
 
         Гибридный поиск в два шага:
 
-        ШАГ 1 — Keyword matching (быстро, без embeddings):
+        ШАГ 1 — Keyword matching (временно отключён):
             Берём все разделы из коллекции sections и проверяем, встречается ли
             хотя бы одно ключевое слово раздела в тексте вопроса (регистронезависимо).
             Если найдено совпадение — возвращаем раздел сразу, без обращения к Qdrant.
@@ -626,46 +626,33 @@ class KnowledgeBase:
             Приоритет отдаётся разделу с наибольшим количеством совпавших ключевых слов —
             это снижает вероятность ложного срабатывания на короткие общие слова.
 
-        ШАГ 2 — Vector search (точно, но дороже):
-            Если ни одно ключевое слово не совпало — векторизуем вопрос и ищем
-            ближайший раздел по косинусной схожести (порог 0.70).
-            Этот шаг используется как запасной вариант для вопросов, сформулированных
-            иначе, чем ключевые слова, но семантически близких к теме раздела.
+        ШАГ 2 — Vector search:
+            Векторизуем вопрос и ищем ближайший раздел по косинусной схожести (порог 0.70).
 
         Параметр user_id сохранён в сигнатуре для обратной совместимости.
         """
         QUERY_SECTION_THRESHOLD = 0.70
-        query_lower = query.lower()
 
-        # --- ШАГ 1: Keyword matching ---
-        all_sections = self._get_user_sections()   # все разделы из коллекции sections
+        # --- ШАГ 1: Keyword matching (временно отключён) ---
+        # query_lower = query.lower()
+        # all_sections = self._get_user_sections()
+        # best_keyword_match = None
+        # best_keyword_count = 0
+        # for section in all_sections:
+        #     keywords = section.get("keywords", [])
+        #     if not keywords:
+        #         continue
+        #     matched_keywords = [kw for kw in keywords if kw.lower() in query_lower]
+        #     count = len(matched_keywords)
+        #     if count > best_keyword_count:
+        #         best_keyword_count = count
+        #         best_keyword_match = section
+        #         print(f"🔑 Keyword hit: раздел '{section['name']}', совпавшие слова: {matched_keywords}")
+        # if best_keyword_match:
+        #     print(f"✅ Раздел найден по ключевым словам ({best_keyword_count} совп.): '{best_keyword_match['name']}'")
+        #     return best_keyword_match
 
-        best_keyword_match = None
-        best_keyword_count = 0
-
-        for section in all_sections:
-            keywords = section.get("keywords", [])
-            if not keywords:
-                continue
-
-            # Считаем, сколько ключевых слов раздела встретилось в вопросе
-            matched_keywords = [kw for kw in keywords if kw.lower() in query_lower]
-            count = len(matched_keywords)
-
-            if count > best_keyword_count:
-                best_keyword_count = count
-                best_keyword_match = section
-                print(f"🔑 Keyword hit: раздел '{section['name']}', "
-                      f"совпавшие слова: {matched_keywords}")
-
-        if best_keyword_match:
-            print(f"✅ Раздел найден по ключевым словам ({best_keyword_count} совп.): "
-                  f"'{best_keyword_match['name']}'")
-            return best_keyword_match
-
-        # --- ШАГ 2: Vector search (запасной вариант) ---
-        print("🔍 Keyword matching не дал результата — переходим к векторному поиску...")
-
+        # --- ШАГ 2: Vector search ---
         query_vector = self.embeddings.embed_query(query)
 
         response = self.qdrant_client.query_points(
@@ -692,6 +679,48 @@ class KnowledgeBase:
               f"(score: {matched['score']:.2f})")
         return matched
 
+
+    def _resolve_section(self, classification: Dict, user_id: int) -> tuple:
+        """Определяет section_id и section_name по результату классификации.
+
+        Вынесено из add_document и add_text во избежание дублирования кода.
+
+        Логика:
+        - is_new=True → ищем похожий раздел через векторный поиск (порог 0.85).
+                         Если нашли — переиспользуем, пополняем keywords.
+                         Если нет — создаём новый.
+        - is_new=False → ищем по имени среди существующих разделов.
+                         Нашли — пополняем keywords.
+                         Не нашли — создаём (страховка от рассинхрона).
+
+        Возвращает: (section_id: str, section_name: str)
+        """
+        section_name        = classification["section_name"]
+        section_description = classification["description"]
+        keywords            = classification.get("keywords", [])
+        existing_sections   = self._get_user_sections()
+
+        if classification.get("is_new", True):
+            similar = self._find_similar_section(section_description, user_id)
+            if similar:
+                print(f"🔍 Найден похожий раздел: '{similar['name']}' (score: {similar['score']:.2f})")
+                section_id   = similar["id"]
+                section_name = similar["name"]
+                self._update_section_keywords(section_id, keywords)
+            else:
+                section_id = self._create_section(section_name, section_description, keywords, user_id)
+        else:
+            section_id = None
+            for section in existing_sections:
+                if section["name"] == section_name:
+                    section_id = section["id"]
+                    break
+            if section_id:
+                self._update_section_keywords(section_id, keywords)
+            else:
+                section_id = self._create_section(section_name, section_description, keywords, user_id)
+
+        return section_id, section_name
 
     def _create_section(self, section_name: str, description: str, 
                        keywords: List[str], user_id: int) -> str:
